@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>動物圖鑑狂熱：AI 探險巡警 (Animal Snap AI Quest)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
+    <!-- TensorFlow.js and Teachable Machine Image Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.5/dist/teachablemachine-image.min.js"></script>
+    <!-- Canvas Confetti for Celebration Effects -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Outfit', 'Noto Sans TC', sans-serif;
+            background: radial-gradient(circle at top center, #1e293b, #0f172a);
+            color: #f8fafc;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Glassmorphic UI Card */
+        .glass-card {
+            background: rgba(30, 41, 59, 0.75);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Scanner Frame Animations */
+        @keyframes scanLine {
+            0% { top: 0%; opacity: 0.8; }
+            50% { opacity: 1; }
+            100% { top: 100%; opacity: 0.8; }
+        }
+
+        .scan-line {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #38bdf8, #4ade80, #38bdf8, transparent);
+            box-shadow: 0 0 15px #38bdf8;
+            animation: scanLine 2.5s ease-in-out infinite alternate;
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% { transform: scale(1); opacity: 0.9; }
+            50% { transform: scale(1.03); opacity: 1; }
+        }
+
+        .pulse-active {
+            animation: pulseGlow 1.2s ease-in-out infinite;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen justify-between items-center p-3 sm:p-6">
+
+    <!-- Top Navigation & Score Header -->
+    <header class="w-full max-w-5xl flex flex-wrap justify-between items-center gap-4 mb-4 glass-card p-4 rounded-2xl">
+        <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center text-2xl shadow-lg shadow-emerald-500/20">
+                <i class="fa-solid fa-paw text-white"></i>
+            </div>
+            <div>
+                <h1 class="font-extrabold text-xl sm:text-2xl bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400">
+                    AI 動物圖鑑巡警
+                </h1>
+                <p class="text-xs text-slate-400">Teachable Machine 雙螢幕快問快答</p>
+            </div>
+        </div>
+
+        <!-- Global Status / Info Bar -->
+        <div class="flex items-center gap-4 text-sm">
+            <div class="bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/60 flex items-center gap-2">
+                <i class="fa-solid fa-trophy text-amber-400"></i>
+                <span class="text-slate-400 text-xs">得分:</span>
+                <span id="currentScore" class="font-bold text-amber-400 text-base">0</span>
+            </div>
+            <div class="bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/60 flex items-center gap-2">
+                <i class="fa-solid fa-clock text-cyan-400"></i>
+                <span class="text-slate-400 text-xs">時間:</span>
+                <span id="gameTimer" class="font-bold text-cyan-400 text-base">60s</span>
+            </div>
+            <button id="toggleSoundBtn" class="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg border border-slate-700 transition-colors text-slate-300">
+                <i id="soundIcon" class="fa-solid fa-volume-high"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="w-full max-w-5xl flex-1 flex flex-col lg:flex-row gap-6 mb-6">
+        
+        <!-- Left Column: Camera Viewfinder & Scanner Frame -->
+        <div class="flex-1 flex flex-col items-center justify-center relative">
+            <div class="w-full relative glass-card rounded-3xl overflow-hidden aspect-video max-h-[480px] border-2 border-slate-700/50 flex items-center justify-center bg-black/50">
+                
+                <!-- WebCam Video Element -->
+                <video id="webcamVideo" class="w-full h-full object-cover transform -scale-x-100 hidden" autoplay playsinline muted></video>
+                
+                <!-- Placeholder / Loading State -->
+                <div id="cameraPlaceholder" class="flex flex-col items-center justify-center p-6 text-center text-slate-400">
+                    <i class="fa-solid fa-camera-rotate text-5xl mb-3 text-slate-500 animate-pulse"></i>
+                    <p class="font-bold text-lg text-slate-300">準備啟動 AI 巡警鏡頭</p>
+                    <p class="text-xs text-slate-500 max-w-xs mt-1">請允許瀏覽器存取攝影機，並準備好手機顯示動物圖片或塗鴉！</p>
+                </div>
+
+                <!-- HUD Overlay Frame (Active during play) -->
+                <div id="hudOverlay" class="absolute inset-0 pointer-events-none hidden border-2 border-dashed border-emerald-500/40 rounded-3xl m-2 flex flex-col justify-between p-4">
+                    <div class="scan-line"></div>
+                    <div class="flex justify-between items-start">
+                        <span class="bg-slate-900/80 text-emerald-400 text-xs px-2.5 py-1 rounded-md font-mono border border-emerald-500/30 flex items-center gap-1.5">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> AI SCANNING
+                        </span>
+                        <span id="hudConfidence" class="bg-slate-900/80 text-cyan-300 text-xs px-2.5 py-1 rounded-md font-mono border border-cyan-500/30">
+                            Match: 0%
+                        </span>
+                    </div>
+
+                    <!-- Target Focus Corner Guides -->
+                    <div class="flex justify-between items-end">
+                        <span class="text-xs text-slate-400 bg-slate-900/80 px-2 py-1 rounded border border-slate-700">
+                            💡 提示：調高手機螢幕亮度並保持對焦
+                        </span>
+                        <span id="hudTargetTag" class="text-xs font-bold bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded border border-emerald-500/40">
+                            TARGET
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Lock-in Continuous Threshold Progress Bar -->
+                <div id="lockinContainer" class="absolute bottom-0 left-0 right-0 h-3 bg-slate-900/80 hidden">
+                    <div id="lockinBar" class="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 w-0 transition-all duration-75"></div>
+                </div>
+            </div>
+
+            <!-- Model Info Footer -->
+            <div class="w-full mt-2 flex justify-between items-center text-xs text-slate-400 px-2">
+                <span>模型來源: <a href="https://teachablemachine.withgoogle.com/models/MKQlep12B/" target="_blank" class="text-cyan-400 underline hover:text-cyan-300">Teachable Machine MKQlep12B</a></span>
+                <span id="fpsCounter">FPS: --</span>
+            </div>
+        </div>
+
+        <!-- Right Column: Target Quest Panel & Game Controls -->
+        <div class="w-full lg:w-96 flex flex-col gap-4 justify-between">
+            
+            <!-- Target Card Panel -->
+            <div id="questCard" class="glass-card rounded-3xl p-6 flex flex-col items-center text-center relative overflow-hidden">
+                <div class="w-full flex justify-between items-center text-xs font-bold text-slate-400 mb-2">
+                    <span class="uppercase tracking-wider">當前搜圖任務</span>
+                    <span id="questCounter" class="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30">第 1 題</span>
+                </div>
+
+                <!-- Animal Target Display -->
+                <div id="targetEmoji" class="text-7xl my-3 filter drop-shadow-lg transform transition-transform duration-300 hover:scale-110">
+                    🐾
+                </div>
+
+                <h2 id="targetName" class="text-2xl font-black text-white mb-1">
+                    載入中...
+                </h2>
+
+                <p id="targetHint" class="text-xs text-slate-300 bg-slate-800/80 px-3 py-2 rounded-xl border border-slate-700/70 mb-4 w-full">
+                    請使用手機 Google 圖片搜尋，或拿起實體玩具/卡片對準鏡頭！
+                </p>
+
+                <!-- Confidence Gauge / Realtime Bars -->
+                <div class="w-full bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
+                    <div class="flex justify-between text-xs text-slate-400 mb-1">
+                        <span>AI 判定相符度</span>
+                        <span id="targetConfidenceText" class="font-mono text-emerald-400 font-bold">0%</span>
+                    </div>
+                    <div class="w-full bg-slate-800 h-3 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                        <div id="targetConfidenceBar" class="bg-gradient-to-r from-emerald-500 to-cyan-400 h-full rounded-full w-0 transition-all duration-150"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-time Multi-Class Probabilities -->
+            <div class="glass-card rounded-3xl p-4 flex flex-col gap-2 max-h-48 overflow-y-auto">
+                <div class="text-xs font-bold text-slate-400 mb-1 flex justify-between items-center">
+                    <span>即時模型預測分類</span>
+                    <i class="fa-solid fa-chart-simple text-cyan-400"></i>
+                </div>
+                <div id="predictionList" class="space-y-1.5 text-xs">
+                    <!-- Dynamic prediction items inserted here -->
+                    <div class="text-center text-slate-500 py-4">模型尚未載入</div>
+                </div>
+            </div>
+
+            <!-- Primary Action Buttons -->
+            <div class="flex flex-col gap-2">
+                <button id="startBtn" class="w-full py-3.5 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-lg shadow-lg shadow-emerald-500/25 transform active:scale-95 transition-all flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-play"></i>
+                    <span>啟動 AI 探險任務</span>
+                </button>
+                <button id="skipBtn" class="w-full py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-sm border border-slate-700 transition-colors hidden">
+                    <i class="fa-solid fa-forward text-amber-400 mr-1"></i> 跳過此題 (-10分)
+                </button>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Modal: Game Over / Victory Screen -->
+    <div id="gameOverModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-card max-w-md w-full rounded-3xl p-6 sm:p-8 flex flex-col items-center text-center border border-slate-700/80 shadow-2xl relative animate-in fade-in zoom-in duration-300">
+            
+            <div class="w-20 h-20 rounded-2xl bg-gradient-to-tr from-amber-400 to-orange-500 flex items-center justify-center text-4xl text-slate-950 mb-4 shadow-xl shadow-amber-500/30">
+                <i class="fa-solid fa-crown"></i>
+            </div>
+
+            <h2 class="text-2xl sm:text-3xl font-black text-white mb-1">任務結束！</h2>
+            <p class="text-sm text-slate-400 mb-6">感謝巡警的努力，恭喜獲得稱號！</p>
+
+            <div class="w-full bg-slate-900/80 rounded-2xl p-4 border border-slate-800 mb-6 space-y-3">
+                <div class="flex justify-between items-center text-sm border-b border-slate-800 pb-2">
+                    <span class="text-slate-400">最終總得分</span>
+                    <span id="finalScore" class="font-extrabold text-2xl text-amber-400">0</span>
+                </div>
+                <div class="flex justify-between items-center text-sm border-b border-slate-800 pb-2">
+                    <span class="text-slate-400">成功辨識動物</span>
+                    <span id="finalCount" class="font-bold text-emerald-400">0 隻</span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                    <span class="text-slate-400">獲得勳章</span>
+                    <span id="finalBadge" class="font-bold text-cyan-300">🥇 AI 搜圖特警</span>
+                </div>
+            </div>
+
+            <button id="restartBtn" class="w-full py-3.5 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 font-black text-base shadow-lg hover:brightness-110 active:scale-95 transition-all">
+                再玩一次
+            </button>
+        </div>
+    </div>
+
+    <!-- System Toast Message Box (Replaces alert) -->
+    <div id="toastMessage" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-900/95 text-white px-5 py-3 rounded-2xl border border-slate-700 shadow-2xl text-sm font-semibold flex items-center gap-3 z-50 transition-all duration-300 opacity-0 pointer-events-none translate-y-4">
+        <i id="toastIcon" class="fa-solid fa-circle-info text-cyan-400 text-lg"></i>
+        <span id="toastText">訊息通知</span>
+    </div>
+
+    <script>
+        // Web Audio API Sound Generator for Arcade FX
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.muted = false;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playBeep(freq = 440, duration = 0.1, type = 'sine') {
+                if (this.muted) return;
+                try {
+                    this.init();
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch (e) {
+                    console.error("Audio error", e);
+                }
+            }
+
+            playSuccess() {
+                if (this.muted) return;
+                this.playBeep(523.25, 0.1, 'triangle'); // C5
+                setTimeout(() => this.playBeep(659.25, 0.1, 'triangle'), 80); // E5
+                setTimeout(() => this.playBeep(783.99, 0.25, 'triangle'), 160); // G5
+            }
+
+            playLocking() {
+                if (this.muted) return;
+                this.playBeep(880, 0.05, 'square');
+            }
+
+            playGameOver() {
+                if (this.muted) return;
+                this.playBeep(400, 0.15, 'sawtooth');
+                setTimeout(() => this.playBeep(300, 0.2, 'sawtooth'), 150);
+                setTimeout(() => this.playBeep(200, 0.3, 'sawtooth'), 300);
+            }
+        }
+
+        const sound = new SoundFX();
+
+        // Dictionary mapping model class names to emojis, Taiwanese labels, and search hints
+        const ANIMAL_DICT = {
+            'cat': { name: '貓咪', emoji: '🐱', hint: '用手機搜「貓咪寫真」或「可愛貓貓」' },
+            'dog': { name: '狗狗', emoji: '🐶', hint: '用手機搜「汪星人」或「柴犬/黃金獵犬」' },
+            'bird': { name: '鳥類', emoji: '🐦', hint: '用手機搜「彩色小鳥」或「金剛鸚鵡」' },
+            'elephant': { name: '大象', emoji: '🐘', hint: '用手機搜「非洲大象」長鼻子照片' },
+            'lion': { name: '獅子', emoji: '🦁', hint: '用手機搜「萬獸之王獅子」雄偉照片' },
+            'tiger': { name: '老虎', emoji: '🐯', hint: '用手機搜「斑紋老虎」或「野生虎」' },
+            'bear': { name: '熊熊', emoji: '🐻', hint: '用手機搜「黑熊」或「棕熊」照片' },
+            'rabbit': { name: '兔子', emoji: '🐰', hint: '用手機搜「小白兔」長耳朵照片' },
+            'panda': { name: '貓熊', emoji: '🐼', hint: '用手機搜「團團圓圓大貓熊」' },
+            'monkey': { name: '猴子', emoji: '🐵', hint: '用手機搜「台灣獼猴」或「小猴子」' },
+            'snake': { name: '蛇', emoji: '🐍', hint: '用手機搜「青竹絲」或「錦蛇」照片' },
+            'frog': { name: '青蛙', emoji: '🐸', hint: '用手機搜「樹蛙」或「綠色青蛙」' },
+            'fox': { name: '狐狸', emoji: '🦊', hint: '用手機搜「赤狐」或「雪狐」照片' },
+            'duck': { name: '鴨子', emoji: '🦆', hint: '用手機搜「黃色小鴨」或「綠頭鴨」' },
+            'background': { name: '背景/無目標', emoji: '🖼️', isBackground: true },
+            '背景': { name: '背景/無目標', emoji: '🖼️', isBackground: true }
+        };
+
+        // Teachable Machine URL configured by prompt
+        const MODEL_URL = "https://teachablemachine.withgoogle.com/models/MKQlep12B/";
+
+        let model, webcam, maxPredictions;
+        let isModelLoaded = false;
+        let isPlaying = false;
+        let gameTimer = 60;
+        let timerInterval = null;
+        let score = 0;
+        let completedCount = 0;
+
+        // Current target state
+        let currentTarget = null;
+        let targetDeck = [];
+        let targetIndex = 0;
+
+        // Prediction Smoothing Window (5 frames)
+        const SMOOTHING_WINDOW_SIZE = 6;
+        let predictionHistory = {}; // className -> Array of last N predictions
+
+        // Lock-in confirmation timing
+        let lockinStartTime = null;
+        const REQUIRED_LOCKIN_TIME = 400; // ms required above confidence threshold
+        const CONFIDENCE_THRESHOLD = 0.82; // 82% confidence threshold
+
+        // DOM Element references
+        const webcamVideo = document.getElementById('webcamVideo');
+        const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+        const hudOverlay = document.getElementById('hudOverlay');
+        const hudConfidence = document.getElementById('hudConfidence');
+        const hudTargetTag = document.getElementById('hudTargetTag');
+        const lockinContainer = document.getElementById('lockinContainer');
+        const lockinBar = document.getElementById('lockinBar');
+        const currentScoreEl = document.getElementById('currentScore');
+        const gameTimerEl = document.getElementById('gameTimer');
+        const startBtn = document.getElementById('startBtn');
+        const skipBtn = document.getElementById('skipBtn');
+        const targetEmoji = document.getElementById('targetEmoji');
+        const targetName = document.getElementById('targetName');
+        const targetHint = document.getElementById('targetHint');
+        const targetConfidenceBar = document.getElementById('targetConfidenceBar');
+        const targetConfidenceText = document.getElementById('targetConfidenceText');
+        const predictionList = document.getElementById('predictionList');
+        const questCounter = document.getElementById('questCounter');
+        const gameOverModal = document.getElementById('gameOverModal');
+        const toggleSoundBtn = document.getElementById('toggleSoundBtn');
+        const soundIcon = document.getElementById('soundIcon');
+
+        // Toast Helper
+        function showToast(message, iconClass = 'fa-circle-info text-cyan-400') {
+            const toast = document.getElementById('toastMessage');
+            const toastText = document.getElementById('toastText');
+            const toastIcon = document.getElementById('toastIcon');
+
+            toastText.textContent = message;
+            toastIcon.className = `fa-solid ${iconClass} text-lg`;
+
+            toast.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-4');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'pointer-events-none', 'translate-y-4');
+            }, 3000);
+        }
+
+        async function loadModelAndCamera() {
+            try {
+                showToast("正在載入 AI 模型，請稍候...", "fa-spinner animate-spin text-amber-400");
+                startBtn.disabled = true;
+                startBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i><span>AI 模型載入中...</span>`;
+
+                const modelURL = MODEL_URL + "model.json";
+                const metadataURL = MODEL_URL + "metadata.json";
+
+                // Load Teachable Machine Model
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+                const labels = model.getClassLabels();
+
+                console.log("Model classes loaded:", labels);
+
+                // Build quest deck dynamically based on model classes
+                targetDeck = [];
+                labels.forEach(label => {
+                    const lowerLabel = label.toLowerCase().trim();
+                    const info = ANIMAL_DICT[lowerLabel] || {
+                        name: label,
+                        emoji: '🐾',
+                        hint: `請在手機搜尋「${label}」圖片對準鏡頭！`
+                    };
+
+                    if (!info.isBackground) {
+                        targetDeck.push({
+                            rawLabel: label,
+                            name: info.name,
+                            emoji: info.emoji,
+                            hint: info.hint
+                        });
+                    }
+                });
+
+                // Fallback if deck is empty
+                if (targetDeck.length === 0) {
+                    targetDeck.push({ rawLabel: labels[0], name: labels[0], emoji: '🐾', hint: '請搜尋此類別圖片對準鏡頭' });
+                }
+
+                // Shuffle quest deck
+                targetDeck.sort(() => Math.random() - 0.5);
+
+                // Request WebCam Stream
+                showToast("請授權攝影機存取權利...", "fa-video text-emerald-400");
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
+                });
+
+                webcamVideo.srcObject = stream;
+                await new Promise((resolve) => {
+                    webcamVideo.onloadedmetadata = () => {
+                        resolve();
+                    };
+                });
+                webcamVideo.play();
+
+                // UI updates on success
+                cameraPlaceholder.classList.add('hidden');
+                webcamVideo.classList.remove('hidden');
+                hudOverlay.classList.remove('hidden');
+                lockinContainer.classList.remove('hidden');
+
+                isModelLoaded = true;
+                startBtn.disabled = false;
+                startBtn.innerHTML = `<i class="fa-solid fa-play"></i><span>開始 AI 快問快答</span>`;
+                showToast("AI 模型與鏡頭準備就緒！", "fa-circle-check text-emerald-400");
+
+                // Start AI prediction loop
+                requestAnimationFrame(loop);
+
+            } catch (err) {
+                console.error("Initialization error:", err);
+                showToast("無法載入模型或攝影機權限被拒絕", "fa-triangle-exclamation text-rose-400");
+                startBtn.disabled = false;
+                startBtn.innerHTML = `<i class="fa-solid fa-rotate-right"></i><span>重新試驗</span>`;
+            }
+        }
+
+        // Smooth predictions using sliding window
+        function getSmoothedPredictions(rawPredictions) {
+            const smoothed = [];
+
+            rawPredictions.forEach(pred => {
+                if (!predictionHistory[pred.className]) {
+                    predictionHistory[pred.className] = [];
+                }
+
+                // Add to history
+                predictionHistory[pred.className].push(pred.probability);
+                if (predictionHistory[pred.className].length > SMOOTHING_WINDOW_SIZE) {
+                    predictionHistory[pred.className].shift();
+                }
+
+                // Calculate average
+                const sum = predictionHistory[pred.className].reduce((a, b) => a + b, 0);
+                const avg = sum / predictionHistory[pred.className].length;
+
+                smoothed.push({
+                    className: pred.className,
+                    probability: avg
+                });
+            });
+
+            // Sort descending
+            smoothed.sort((a, b) => b.probability - a.probability);
+            return smoothed;
+        }
+
+        // Main AI Inference Frame Loop
+        async function loop() {
+            if (isModelLoaded && webcamVideo.readyState === 4) {
+                // Wrap prediction inside tf.tidy to avoid WebGL memory leaks
+                let rawPredictions = [];
+                await tf.tidy(() => {
+                    return model.predict(webcamVideo).then(preds => {
+                        rawPredictions = preds;
+                    });
+                });
+
+                if (rawPredictions.length > 0) {
+                    const predictions = getSmoothedPredictions(rawPredictions);
+                    updatePredictionUI(predictions);
+
+                    if (isPlaying && currentTarget) {
+                        checkTargetMatch(predictions);
+                    }
+                }
+            }
+            requestAnimationFrame(loop);
+        }
+
+        function updatePredictionUI(predictions) {
+            // Render real-time probability list
+            predictionList.innerHTML = predictions.slice(0, 4).map(pred => {
+                const percent = Math.round(pred.probability * 100);
+                const info = ANIMAL_DICT[pred.className.toLowerCase().trim()] || { name: pred.className, emoji: '🐾' };
+                return `
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between items-center text-slate-300">
+                            <span>${info.emoji} ${info.name}</span>
+                            <span class="font-mono text-xs font-bold text-slate-400">${percent}%</span>
+                        </div>
+                        <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                            <div class="bg-cyan-500 h-full rounded-full transition-all duration-75" style="width: ${percent}%"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Update Target Specific Bar if active
+            if (currentTarget) {
+                const targetPred = predictions.find(p => p.className === currentTarget.rawLabel);
+                const targetProb = targetPred ? targetPred.probability : 0;
+                const targetPercent = Math.round(targetProb * 100);
+
+                targetConfidenceBar.style.width = `${targetPercent}%`;
+                targetConfidenceText.textContent = `${targetPercent}%`;
+                hudConfidence.textContent = `Match: ${targetPercent}%`;
+            }
+        }
+
+        // Lock-in continuous verification algorithm
+        function checkTargetMatch(predictions) {
+            const targetPred = predictions.find(p => p.className === currentTarget.rawLabel);
+            const prob = targetPred ? targetPred.probability : 0;
+
+            if (prob >= CONFIDENCE_THRESHOLD) {
+                if (!lockinStartTime) {
+                    lockinStartTime = performance.now();
+                    sound.playLocking();
+                }
+
+                const elapsedTime = performance.now() - lockinStartTime;
+                const progress = Math.min(1, elapsedTime / REQUIRED_LOCKIN_TIME);
+                lockinBar.style.width = `${progress * 100}%`;
+
+                if (elapsedTime >= REQUIRED_LOCKIN_TIME) {
+                    // TARGET CAPTURED!
+                    onTargetCaptured();
+                }
+            } else {
+                // Reset lock-in if score drops below threshold
+                lockinStartTime = null;
+                lockinBar.style.width = '0%';
+            }
+        }
+
+        function onTargetCaptured() {
+            sound.playSuccess();
+            confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
+
+            score += 100;
+            completedCount++;
+            currentScoreEl.textContent = score;
+
+            showToast(`成功辨識 ${currentTarget.name}！ +100分`, "fa-circle-check text-emerald-400");
+
+            lockinStartTime = null;
+            lockinBar.style.width = '0%';
+
+            // Next Question
+            nextQuestion();
+        }
+
+        function setNextTarget() {
+            if (targetDeck.length === 0) return;
+
+            currentTarget = targetDeck[targetIndex % targetDeck.length];
+            targetIndex++;
+
+            targetEmoji.textContent = currentTarget.emoji;
+            targetName.textContent = currentTarget.name;
+            targetHint.textContent = currentTarget.hint;
+            hudTargetTag.textContent = `TASK: ${currentTarget.name}`;
+            questCounter.textContent = `第 ${completedCount + 1} 題`;
+
+            targetEmoji.classList.add('scale-125');
+            setTimeout(() => targetEmoji.classList.remove('scale-125'), 300);
+        }
+
+        function nextQuestion() {
+            setNextTarget();
+        }
+
+        function startGame() {
+            if (!isModelLoaded) {
+                loadModelAndCamera();
+                return;
+            }
+
+            score = 0;
+            completedCount = 0;
+            gameTimer = 60;
+            targetIndex = 0;
+            isPlaying = true;
+
+            currentScoreEl.textContent = score;
+            gameTimerEl.textContent = `${gameTimer}s`;
+
+            skipBtn.classList.remove('hidden');
+            startBtn.classList.add('hidden');
+
+            setNextTarget();
+            sound.init();
+
+            // Start Countdown Timer
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                gameTimer--;
+                gameTimerEl.textContent = `${gameTimer}s`;
+
+                if (gameTimer <= 10) {
+                    gameTimerEl.classList.add('text-rose-400', 'animate-pulse');
+                    sound.playBeep(800, 0.05);
+                } else {
+                    gameTimerEl.classList.remove('text-rose-400', 'animate-pulse');
+                }
+
+                if (gameTimer <= 0) {
+                    endGame();
+                }
+            }, 1000);
+
+            showToast("遊戲開始！請快速搜尋畫面上顯示的動物！", "fa-bolt text-amber-400");
+        }
+
+        function endGame() {
+            isPlaying = false;
+            clearInterval(timerInterval);
+            sound.playGameOver();
+
+            skipBtn.classList.add('hidden');
+            startBtn.classList.remove('hidden');
+            startBtn.innerHTML = `<i class="fa-solid fa-rotate-right"></i><span>再試一次</span>`;
+
+            // Badge determination
+            let badge = "🥉 探險實習生";
+            if (score >= 500) badge = "🥇 AI 搜圖巡警王";
+            else if (score >= 300) badge = "🥈 資深動物特警";
+
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('finalCount').textContent = `${completedCount} 隻`;
+            document.getElementById('finalBadge').textContent = badge;
+
+            gameOverModal.classList.remove('hidden');
+        }
+
+        // Skip current target with penalty
+        skipBtn.addEventListener('click', () => {
+            if (!isPlaying) return;
+            score = Math.max(0, score - 10);
+            currentScoreEl.textContent = score;
+            showToast("已跳過該題目 (-10分)", "fa-forward text-amber-400");
+            nextQuestion();
+        });
+
+        startBtn.addEventListener('click', () => {
+            if (!isModelLoaded) {
+                loadModelAndCamera();
+            } else {
+                startGame();
+            }
+        });
+
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            gameOverModal.classList.add('hidden');
+            startGame();
+        });
+
+        // Toggle Sound Mute
+        toggleSoundBtn.addEventListener('click', () => {
+            sound.muted = !sound.muted;
+            if (sound.muted) {
+                soundIcon.className = "fa-solid fa-volume-xmark text-rose-400";
+                showToast("靜音模式", "fa-volume-xmark text-rose-400");
+            } else {
+                soundIcon.className = "fa-solid fa-volume-high text-emerald-400";
+                sound.init();
+                sound.playBeep(600, 0.1);
+                showToast("音效已開啟", "fa-volume-high text-emerald-400");
+            }
+        });
+
+        // Window unload cleanup (Release WebCam stream)
+        window.addEventListener('beforeunload', () => {
+            if (webcamVideo.srcObject) {
+                webcamVideo.srcObject.getTracks().forEach(track => track.stop());
+            }
+        });
+
+        // Auto load on boot
+        window.onload = () => {
+            showToast("點擊下方按鈕啟動攝影機與 AI 模型", "fa-hand-pointer text-cyan-400");
+        };
+    </script>
+</body>
+</html>
